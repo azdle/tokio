@@ -1,6 +1,7 @@
 use std::io;
+use std::marker::PhantomData;
 use std::os::unix::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use futures::{Async, Poll, Stream, Sink, StartSend, AsyncSink};
 
@@ -27,16 +28,17 @@ use bytes::{BytesMut, BufMut};
 /// them into separate objects, allowing them to interact more easily.
 #[must_use = "sinks do nothing unless polled"]
 #[derive(Debug)]
-pub struct UnixDatagramFramed<C> {
+pub struct UnixDatagramFramed<A, C> {
     socket: UnixDatagram,
     codec: C,
     rd: BytesMut,
     wr: BytesMut,
     out_addr: PathBuf,
     flushed: bool,
+    phantom_sink_addr_type: PhantomData<A>,
 }
 
-impl<C: Decoder> Stream for UnixDatagramFramed<C> {
+impl<A, C: Decoder> Stream for UnixDatagramFramed<A, C> {
     type Item = (C::Item, SocketAddr);
     type Error = C::Error;
 
@@ -58,8 +60,8 @@ impl<C: Decoder> Stream for UnixDatagramFramed<C> {
     }
 }
 
-impl<C: Encoder> Sink for UnixDatagramFramed<C> {
-    type SinkItem = (C::Item, PathBuf);
+impl<A: AsRef<Path>, C: Encoder> Sink for UnixDatagramFramed<A, C> {
+    type SinkItem = (C::Item, A);
     type SinkError = C::Error;
 
     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
@@ -74,7 +76,7 @@ impl<C: Encoder> Sink for UnixDatagramFramed<C> {
 
         let (frame, out_addr) = item;
         self.codec.encode(frame, &mut self.wr)?;
-        self.out_addr = out_addr;
+        self.out_addr = out_addr.as_ref().to_path_buf();
         self.flushed = false;
         trace!("frame encoded; length={}", self.wr.len());
 
@@ -110,11 +112,11 @@ impl<C: Encoder> Sink for UnixDatagramFramed<C> {
 const INITIAL_RD_CAPACITY: usize = 64 * 1024;
 const INITIAL_WR_CAPACITY: usize = 8 * 1024;
 
-impl<C> UnixDatagramFramed<C> {
+impl<A, C> UnixDatagramFramed<A, C> {
     /// Create a new `UnixDatagramFramed` backed by the given socket and codec.
     ///
     /// See struct level documentation for more details.
-    pub fn new(socket: UnixDatagram, codec: C) -> UnixDatagramFramed<C> {
+    pub fn new(socket: UnixDatagram, codec: C) -> UnixDatagramFramed<A, C> {
         UnixDatagramFramed {
             socket: socket,
             codec: codec,
@@ -122,6 +124,7 @@ impl<C> UnixDatagramFramed<C> {
             rd: BytesMut::with_capacity(INITIAL_RD_CAPACITY),
             wr: BytesMut::with_capacity(INITIAL_WR_CAPACITY),
             flushed: true,
+            phantom_sink_addr_type: PhantomData,
         }
     }
 
