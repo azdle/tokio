@@ -501,6 +501,16 @@ impl Handle {
             handle.wakeup();
         }
     }
+
+    /// Inform mio of externally-imposed sleep
+    pub fn external_sleep(&self) -> bool {
+        if let Some(handle) = self.as_priv() {
+            handle.external_sleep()
+        } else {
+            // Todo: should this return type be Option<bool>?
+            false
+        }
+    }
 }
 
 impl Unpark for Handle {
@@ -637,6 +647,15 @@ impl HandlePriv {
 
     fn inner(&self) -> Option<Arc<Inner>> {
         self.inner.upgrade()
+    }
+
+    pub fn external_sleep(&self) -> bool {
+        if let Some(inner) = self.inner() {
+            inner.io.external_sleep()
+        } else {
+            // Todo: should this return type be Option<bool>?
+            false
+        }
     }
 }
 
